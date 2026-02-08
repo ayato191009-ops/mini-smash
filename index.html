@@ -2,32 +2,43 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>スマブラ風対戦</title>
+<title>スマブラ風対戦 完全版</title>
 <style>
-  body{ margin:0; overflow:hidden; background:#222; }
-  canvas{ background:#87ceeb; display:block; margin:0 auto; }
-  /* ボタン */
-  #controls{ position:absolute; bottom:20px; right:20px; width:180px; height:180px; }
-  .btn{ width:50px; height:50px; border-radius:50%; margin:5px; display:flex; justify-content:center; align-items:center;
-        background:#555; color:white; font-weight:bold; font-size:20px; text-shadow:1px 1px 2px black; user-select:none; }
-  #jumpBtn{ position:absolute; left:20px; bottom:220px; }
+body{ margin:0; overflow:hidden; background:#222; }
+#game{
+  display:block;
+  margin:0 auto;
+  width:80vw;   /* 画面幅の8割 */
+  height:80vh;  /* 画面高さの8割 */
+  background:#87ceeb;
+}
+.btn{
+  border-radius:50%; display:flex; justify-content:center; align-items:center;
+  background:#555; color:white; font-weight:bold; text-shadow:1px 1px 2px black; user-select:none;
+}
+#controls{
+  position:absolute; top:0; left:0; width:100%; height:100%;
+}
 </style>
 </head>
 <body>
-<canvas id="game" width="800" height="400"></canvas>
+<canvas id="game"></canvas>
 
-<!-- コントロールボタン -->
 <div id="controls">
-  <div id="stick" style="position:absolute; left:0; bottom:0; width:160px; height:160px; border-radius:50%; background:rgba(100,100,100,0.5);"></div>
-  <div id="attackA" class="btn" style="position:absolute; right:0; bottom:80px;">A</div>
-  <div id="attackB" class="btn" style="position:absolute; right:80px; bottom:20px;">B</div>
-  <div id="jump" class="btn" style="position:absolute; right:80px; bottom:80px;">JUMP</div>
+  <!-- 左下スティック -->
+  <div id="stick" class="btn" style="position:absolute; left:5%; bottom:5%; width:18vw; height:18vw;"></div>
+  <!-- 右下ジャンプ -->
+  <div id="jump" class="btn" style="position:absolute; right:5%; bottom:5%; width:18vw; height:18vw; font-size:2vw;">JUMP</div>
+  <!-- 攻撃ボタン A/B -->
+  <div id="attackA" class="btn" style="position:absolute; right:25%; bottom:5%; width:18vw; height:18vw; font-size:2vw;">A</div>
+  <div id="attackB" class="btn" style="position:absolute; right:25%; bottom:25%; width:18vw; height:18vw; font-size:2vw;">B</div>
 </div>
 
 <script>
 const canvas=document.getElementById("game"), ctx=canvas.getContext("2d");
-let keys={left:false,right:false,up:false,down:false};
+let keys={left:false,right:false};
 
+// --- Player Class ---
 class Player{
   constructor(x,y,color,isCPU=false){
     this.x=x; this.y=y; this.w=32; this.h=48;
@@ -37,21 +48,22 @@ class Player{
   }
   onGround(){ return this.y+this.h>=canvas.height-40; }
   update(target){
-    // CPUはupdate別で処理
     if(!this.isCPU){
-      // 移動
       this.vx=0;
       if(keys.left) this.vx=-4;
       if(keys.right) this.vx=4;
-      // 重力
-      if(!this.onGround()) this.vy+=0.5; else { this.vy=0; this.jumpCount=0; this.y=canvas.height-40-this.h; }
+
+      if(!this.onGround()) this.vy+=0.5; 
+      else { this.vy=0; this.jumpCount=0; this.y=canvas.height-40-this.h; }
+
       this.x+=this.vx; this.y+=this.vy;
-      // 攻撃タイマー減少
+
       if(this.attackTimer>0) this.attackTimer--;
       if(this.attackTimer===0 && this.state==="attack") this.state="idle";
     } else {
       this.updateCPU(target);
     }
+
     // 場外判定
     if(this.y>canvas.height+50 || this.x<-50 || this.x>canvas.width+50 || this.y<-50){
         this.respawn();
@@ -99,6 +111,7 @@ class Player{
     // 手足初期位置
     let lH=this.x-8,lHY=this.y+8, rH=this.x+this.w, rHY=this.y+8;
     let lF=this.x+8,lFY=this.y+this.h, rF=this.x+this.w-20,rFY=this.y+this.h;
+
     if(this.state==="attack"){
       switch(this.attackType){
         case "weak": rH+=6; break;
@@ -107,17 +120,23 @@ class Player{
         case "down": lHY+=8; rHY+=8; break;
       }
     }
+
+    // 手
     ctx.fillRect(lH,lHY,8,this.h-16);
     ctx.fillRect(rH,rHY,8,this.h-16);
+
+    // 足
     ctx.fillRect(lF,lFY,12,16);
     ctx.fillRect(rF,rFY,12,16);
 
+    // ラベル
     ctx.fillStyle="white"; ctx.font="14px sans-serif";
     ctx.fillText(this.isCPU?"CPU":"P",this.x,this.y-25);
     ctx.globalAlpha=1;
   }
 }
 
+// --- CPU Class ---
 class CPU extends Player{
   constructor(x,y,color){ super(x,y,color,true); this.aiTimer=0; }
   updateCPU(player){
@@ -132,20 +151,19 @@ class CPU extends Player{
       else if(Math.abs(dx)<120 && Math.random()<0.3){ this.state="attack"; this.attackType="forward"; this.attackTimer=24; }
       else if(Math.abs(dx)<60 && dy>20 && Math.random()<0.2){ this.state="attack"; this.attackType="down"; this.attackTimer=18; }
     }
-    // 重力
     if(!this.onGround()) this.vy+=0.5; else { this.vy=0; this.jumpCount=0; this.y=canvas.height-40-this.h; }
     this.x+=this.vx; this.y+=this.vy;
     if(this.attackTimer>0) this.attackTimer--;
     if(this.attackTimer===0 && this.state==="attack") this.state="idle";
-    // 場外判定
     if(this.y>canvas.height+50 || this.x<-50 || this.x>canvas.width+50 || this.y<-50){ this.respawn(); }
   }
 }
 
+// --- 初期化 ---
 let player=new Player(100,300,"blue");
 let cpu=new CPU(500,300,"green");
-let particles=[];
 
+// --- ゲームループ ---
 function gameLoop(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
@@ -162,7 +180,7 @@ function gameLoop(){
 }
 gameLoop();
 
-// 操作ボタン
+// --- ボタン操作 ---
 document.getElementById("jump").addEventListener("mousedown",()=>{ 
   if(player.jumpCount<2){ player.vy=-10; player.jumpCount++; } 
 });
@@ -173,11 +191,11 @@ document.getElementById("attackB").addEventListener("mousedown",()=>{
   player.state="attack"; player.attackType=player.onGround()?"forward":"air"; player.attackTimer=24;
 });
 
-// 左右移動は簡易スティック
+// スティック
 document.getElementById("stick").addEventListener("mousemove",(e)=>{
   const rect=e.target.getBoundingClientRect();
-  const cx=rect.left+rect.width/2, cy=rect.top+rect.height/2;
-  const dx=e.clientX-cx, dy=e.clientY-cy;
+  const cx=rect.left+rect.width/2;
+  const dx=e.clientX-cx;
   keys.left=dx<-10; keys.right=dx>10;
 });
 document.getElementById("stick").addEventListener("mouseleave",()=>{ keys.left=false; keys.right=false; });
