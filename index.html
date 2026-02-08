@@ -2,202 +2,181 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Mini Smash</title>
+<title>Mini Smash Complete</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-body { margin:0; overflow:hidden; background:#111; }
-canvas { display:block; background:#87ceeb; touch-action:none; }
+body{margin:0;background:#111;touch-action:none}
+canvas{background:#222;display:block;margin:auto}
+.ui{
+  position:fixed;bottom:10px;left:0;right:0;
+  display:flex;justify-content:space-between;padding:0 20px
+}
+.left,.right{display:flex;gap:10px}
+button{
+  width:64px;height:64px;border-radius:50%;
+  font-size:18px;opacity:0.8
+}
 </style>
 </head>
 <body>
-<canvas id="game"></canvas>
+
+<canvas id="game" width="360" height="240"></canvas>
+
+<div class="ui">
+  <div class="left">
+    <button id="l">◀</button>
+    <button id="r">▶</button>
+  </div>
+  <div class="right">
+    <button id="j">⬆</button>
+    <button id="a">A</button>
+    <button id="b">B</button>
+  </div>
+</div>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+const c=document.getElementById("game"),ctx=c.getContext("2d");
+const key={};
 
-function resize(){
-  canvas.width = innerWidth;
-  canvas.height = innerHeight;
-}
-resize();
-addEventListener("resize", resize);
+const bind=(id,k)=>{
+  const e=document.getElementById(id);
+  e.ontouchstart=()=>key[k]=true;
+  e.ontouchend=()=>key[k]=false;
+};
+bind("l","L");bind("r","R");bind("j","J");bind("a","A");bind("b","B");
 
-const GRAVITY = 0.7;
-const GROUND = () => canvas.height - 80;
+document.onkeydown=e=>key[e.key]=true;
+document.onkeyup=e=>key[e.key]=false;
 
-function createFighter(x,color,isCPU=false){
-  return {
-    x,y:200,
-    vx:0,vy:0,
-    dir:1,
-    jumps:2,
-    hp:0,
-    attacking:false,
-    attackType:0,
-    attackTimer:0,
-    alive:true,
-    color,
-    isCPU
-  };
-}
-
-const player = createFighter(150,"white");
-const cpu = createFighter(400,"red",true);
-
-let input = {left:false,right:false,jump:false,attack:false,strong:false};
-
-canvas.addEventListener("touchstart",e=>{
-  const t=e.touches[0];
-  const x=t.clientX, y=t.clientY;
-  if(y < canvas.height*0.3) input.jump=true;
-  else if(y > canvas.height*0.7) {
-    input.attack=true;
-    input.attackStart=Date.now();
+class Fighter{
+  constructor(x,color,ai=false){
+    this.x=x;this.y=150;
+    this.vx=0;this.vy=0;
+    this.w=22;this.h=44;
+    this.dir=1;
+    this.jump=0;
+    this.state="idle";
+    this.timer=0;
+    this.damage=0;
+    this.color=color;
+    this.ai=ai;
+    this.aiTimer=0;
   }
-  else if(x < canvas.width/2) input.left=true;
-  else input.right=true;
-});
 
-canvas.addEventListener("touchend",()=>{
-  if(input.attack){
-    input.strong = Date.now()-input.attackStart>400;
-  }
-  input.left=input.right=input.jump=input.attack=false;
-});
-
-function reset(f){
-  f.x = f.isCPU ? canvas.width-150 : 150;
-  f.y = 200;
-  f.vx = f.vy = 0;
-  f.jumps = 2;
-  f.hp = 0;
-  f.alive = true;
-}
-
-function drawHuman(f){
-  ctx.strokeStyle=f.color;
-  ctx.fillStyle=f.color;
-  ctx.lineWidth=4;
-
-  // 頭
-  ctx.beginPath();
-  ctx.arc(f.x, f.y-40, 14, 0, Math.PI*2);
-  ctx.fill();
-
-  // 胴
-  ctx.beginPath();
-  ctx.moveTo(f.x, f.y-25);
-  ctx.lineTo(f.x, f.y+25);
-  ctx.stroke();
-
-  // 腕（攻撃モーション）
-  let ax = f.attacking ? 30*f.dir : 20*f.dir;
-  ctx.beginPath();
-  ctx.moveTo(f.x, f.y-10);
-  ctx.lineTo(f.x+ax, f.y);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(f.x, f.y-10);
-  ctx.lineTo(f.x-15*f.dir, f.y);
-  ctx.stroke();
-
-  // 脚
-  ctx.beginPath();
-  ctx.moveTo(f.x, f.y+25);
-  ctx.lineTo(f.x-12, f.y+55);
-  ctx.moveTo(f.x, f.y+25);
-  ctx.lineTo(f.x+12, f.y+55);
-  ctx.stroke();
-}
-
-function attackHit(attacker, target){
-  const range = attacker.attackType===2 ? 60 : 40;
-  const dx = (attacker.x + attacker.dir*range) - target.x;
-  const dy = attacker.y - target.y;
-  if(Math.abs(dx)<25 && Math.abs(dy)<40){
-    target.vx += attacker.dir * (attacker.attackType===2?10:6);
-    target.vy -= attacker.attackType===2?8:5;
-    target.hp += attacker.attackType===2?15:8;
-  }
-}
-
-function updateFighter(f, enemy){
-  if(!f.alive) return;
-
-  if(!f.isCPU){
-    if(input.left){ f.vx=-4; f.dir=-1; }
-    else if(input.right){ f.vx=4; f.dir=1; }
-    else f.vx*=0.7;
-
-    if(input.jump && f.jumps>0){
-      f.vy=-13;
-      f.jumps--;
-      input.jump=false;
+  control(enemy){
+    if(this.ai){
+      this.aiTimer--;
+      const d=enemy.x-this.x;
+      if(this.aiTimer<=0){
+        this.aiTimer=30+Math.random()*40;
+        if(Math.abs(d)>90){
+          this.vx=d>0?2:-2;this.dir=this.vx>0?1:-1;
+        }else{
+          this.vx=0;
+          if(Math.random()<0.6)this.attack(Math.random()<0.5?1:2,enemy);
+          if(Math.random()<0.3&&this.jump<2)this.doJump();
+        }
+      }
+      return;
     }
 
-    if(input.strong){
-      f.attacking=true;
-      f.attackType=2;
-      f.attackTimer=15;
-      attackHit(f,enemy);
-      input.strong=false;
-    }
-    else if(input.attack){
-      f.attacking=true;
-      f.attackType=1;
-      f.attackTimer=10;
-      attackHit(f,enemy);
-    }
-  } else {
-    // CPU AI
-    if(enemy.x < f.x-10){ f.vx=-3; f.dir=-1; }
-    else if(enemy.x > f.x+10){ f.vx=3; f.dir=1; }
-    if(Math.random()<0.01 && f.jumps>0){
-      f.vy=-12; f.jumps--;
-    }
-    if(Math.abs(enemy.x-f.x)<50 && !f.attacking){
-      f.attacking=true;
-      f.attackType=1;
-      f.attackTimer=10;
-      attackHit(f,enemy);
+    if(this.state!=="attack"){
+      if(key["L"]||key["a"]){this.vx=-3;this.dir=-1;}
+      else if(key["R"]||key["d"]){this.vx=3;this.dir=1;}
+      else this.vx=0;
+
+      if((key["J"]||key["w"])&&this.jump<2)this.doJump();
+      if(key["A"]||key[" "])this.attack(1,enemy);
+      if(key["B"])this.attack(2,enemy);
     }
   }
 
-  f.vy += GRAVITY;
-  f.x += f.vx;
-  f.y += f.vy;
-
-  if(f.y > GROUND()-55){
-    f.y = GROUND()-55;
-    f.vy = 0;
-    f.jumps = 2;
+  doJump(){
+    this.vy=-10;
+    this.jump++;
+    this.state="jump";
   }
 
-  if(f.attacking){
-    f.attackTimer--;
-    if(f.attackTimer<=0) f.attacking=false;
+  attack(p,enemy){
+    if(this.state==="attack")return;
+    this.state="attack";
+    this.timer=p===1?14:24;
+    this.power=p;
+    this.hitDone=false;
   }
 
-  if(f.y > canvas.height+100 || f.x < -100 || f.x > canvas.width+100){
-    f.alive=false;
-    setTimeout(()=>reset(f),1000);
+  physics(){
+    this.vy+=0.6;
+    this.x+=this.vx;
+    this.y+=this.vy;
+
+    if(this.y+this.h>=200){
+      this.y=200-this.h;
+      this.vy=0;
+      this.jump=0;
+      if(this.state==="jump")this.state="idle";
+    }
+
+    if(this.state==="attack"){
+      this.timer--;
+      if(this.timer<=0)this.state="idle";
+    }
+
+    if(this.y>260){
+      this.x=this.ai?260:80;
+      this.y=0;
+      this.damage=0;
+    }
+  }
+
+  hit(enemy){
+    if(this.state!=="attack"||this.hitDone)return;
+    if(this.timer>6)return;
+
+    const hx=this.x+this.dir*(this.w+10);
+    if(Math.abs(hx-enemy.x)<28&&Math.abs(this.y-enemy.y)<40){
+      const dmg=this.power===1?6:12;
+      enemy.damage+=dmg;
+      const k=1+enemy.damage*0.02;
+      enemy.vx=this.dir*6*k;
+      enemy.vy=-4*k;
+      enemy.state="jump";
+      enemy.hitDone=true;
+    }
+    this.hitDone=true;
+  }
+
+  draw(){
+    ctx.fillStyle=this.state==="attack"?"red":this.color;
+    ctx.fillRect(this.x,this.y,this.w,this.h);
+    // 腕
+    ctx.fillRect(this.x+this.dir*this.w,this.y+14,10,6);
   }
 }
+
+const p=new Fighter(80,"cyan");
+const cpu=new Fighter(260,"orange",true);
 
 function loop(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.clearRect(0,0,360,240);
+  ctx.fillStyle="#555";
+  ctx.fillRect(0,200,360,40);
 
-  // ステージ
-  ctx.fillStyle="#654321";
-  ctx.fillRect(0,GROUND(),canvas.width,80);
+  p.control(cpu);
+  cpu.control(p);
 
-  updateFighter(player,cpu);
-  updateFighter(cpu,player);
+  p.physics();
+  cpu.physics();
 
-  if(player.alive) drawHuman(player);
-  if(cpu.alive) drawHuman(cpu);
+  p.hit(cpu);
+  cpu.hit(p);
+
+  p.draw();
+  cpu.draw();
+
+  ctx.fillStyle="white";
+  ctx.fillText("P:"+Math.floor(p.damage)+"%",10,20);
+  ctx.fillText("CPU:"+Math.floor(cpu.damage)+"%",260,20);
 
   requestAnimationFrame(loop);
 }
