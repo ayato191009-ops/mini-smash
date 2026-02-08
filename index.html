@@ -1,259 +1,186 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>スマブラ風ゲーム 完全版</title>
+<meta charset="utf-8">
+<title>スマブラ風対戦</title>
 <style>
-canvas { background:#aaddff; display:block; margin:0 auto; touch-action:none; }
-#stick,#jump,#attackA,#attackB{
-  position:absolute; border-radius:50%; opacity:0.6; touch-action:none;
-}
-#stick{background:#8888ff;} #jump{background:#88ff88;} #attackA{background:#ff8888;} #attackB{background:#ff44ff;}
+  body{ margin:0; overflow:hidden; background:#222; }
+  canvas{ background:#87ceeb; display:block; margin:0 auto; }
+  /* ボタン */
+  #controls{ position:absolute; bottom:20px; right:20px; width:180px; height:180px; }
+  .btn{ width:50px; height:50px; border-radius:50%; margin:5px; display:flex; justify-content:center; align-items:center;
+        background:#555; color:white; font-weight:bold; font-size:20px; text-shadow:1px 1px 2px black; user-select:none; }
+  #jumpBtn{ position:absolute; left:20px; bottom:220px; }
 </style>
 </head>
 <body>
+<canvas id="game" width="800" height="400"></canvas>
 
-<canvas id="gameCanvas" width="480" height="320"></canvas>
-<div id="stick" style="width:160px;height:160px;left:20px;bottom:20px;"></div>
-<div id="jump"></div>
-<div id="attackA"></div>
-<div id="attackB"></div>
+<!-- コントロールボタン -->
+<div id="controls">
+  <div id="stick" style="position:absolute; left:0; bottom:0; width:160px; height:160px; border-radius:50%; background:rgba(100,100,100,0.5);"></div>
+  <div id="attackA" class="btn" style="position:absolute; right:0; bottom:80px;">A</div>
+  <div id="attackB" class="btn" style="position:absolute; right:80px; bottom:20px;">B</div>
+  <div id="jump" class="btn" style="position:absolute; right:80px; bottom:80px;">JUMP</div>
+</div>
 
 <script>
-const canvas=document.getElementById("gameCanvas");
-const ctx=canvas.getContext("2d");
+const canvas=document.getElementById("game"), ctx=canvas.getContext("2d");
+let keys={left:false,right:false,up:false,down:false};
 
-// --- パーティクル ---
-let particles=[];
-
-// --- スコア & ラウンド管理 ---
-let score={player:0,cpu:0}, roundOver=false, winner="";
-
-// --- 足場 ---
-const platforms=[
-  {x:0,y:260,w:480,h:20},
-  {x:120,y:180,w:120,h:15},
-  {x:280,y:140,w:100,h:15},
-  {x:50,y:100,w:80,h:15}
-];
-
-// --- プレイヤー ---
 class Player{
   constructor(x,y,color,isCPU=false){
-    this.x=x; this.y=y; this.spawnX=x; this.spawnY=y;
-    this.color=color; this.isCPU=isCPU;
-    this.w=32; this.h=40; this.vx=0; this.vy=0; 
-    this.jumpCount=0; this.state="idle"; this.attackTimer=0;
-    this.attackType=""; this.damage=0; this.hitFlash=0; this.hitBounce=0;
-    this.respawnTimer=0;
+    this.x=x; this.y=y; this.w=32; this.h=48;
+    this.vx=0; this.vy=0; this.color=color; this.state="idle"; this.attackType=null; 
+    this.attackTimer=0; this.onGroundFlag=true; this.jumpCount=0; this.damage=0; 
+    this.isCPU=isCPU; this.hitFlash=0; this.hitBounce=0; this.respawnTimer=0;
   }
-
+  onGround(){ return this.y+this.h>=canvas.height-40; }
   update(target){
-    if(!this.isCPU) this.x+=this.vx;
-    this.vy+=0.6; this.y+=this.vy;
-
-    // 足場判定
-    platforms.forEach(p=>{
-      if(this.vy>=0 &&
-         this.x+this.w>p.x && this.x<p.x+p.w &&
-         this.y+this.h>=p.y && this.y+this.h<=p.y+p.h+10){
-           this.y=p.y-this.h;
-           this.vy=0;
-           this.jumpCount=0;
-           if(this.state==="jump") this.state="idle";
-      }
-    });
-
+    // CPUはupdate別で処理
+    if(!this.isCPU){
+      // 移動
+      this.vx=0;
+      if(keys.left) this.vx=-4;
+      if(keys.right) this.vx=4;
+      // 重力
+      if(!this.onGround()) this.vy+=0.5; else { this.vy=0; this.jumpCount=0; this.y=canvas.height-40-this.h; }
+      this.x+=this.vx; this.y+=this.vy;
+      // 攻撃タイマー減少
+      if(this.attackTimer>0) this.attackTimer--;
+      if(this.attackTimer===0 && this.state==="attack") this.state="idle";
+    } else {
+      this.updateCPU(target);
+    }
     // 場外判定
-    if(this.y+this.h>canvas.height || this.x+this.w<0 || this.x>canvas.width || this.y<-this.h){
+    if(this.y>canvas.height+50 || this.x<-50 || this.x>canvas.width+50 || this.y<-50){
         this.respawn();
     }
-
-    // 攻撃判定
-    if(target) this.attackHit(target);
-
-    // 攻撃モーション管理
-    if(this.attackTimer>0){ this.attackTimer--; this.state="attack"; }
-    else if(this.state==="attack"){ this.state="idle"; }
-
-    // ジャンプ/落下モーション
-    if(this.vy<0) this.state="jump";
-    if(this.vy>0 && !this.onGround()) this.state="fall";
   }
-
+  respawn(){
+    this.x=100+Math.random()*400; this.y=100; this.vx=0; this.vy=0; this.damage=0; this.respawnTimer=20; 
+  }
   attackHit(target){
     if(this.state!=="attack") return;
-    const rangeX=40, rangeY=50;
+    let rangeX=40, rangeY=50;
+    switch(this.attackType){
+      case "weak": rangeX=50; rangeY=60; break;
+      case "forward": rangeX=80; rangeY=40; break;
+      case "air": rangeX=60; rangeY=70; break;
+      case "down": rangeX=50; rangeY=80; break;
+    }
     const dx=(this.x+this.w/2)-(target.x+target.w/2);
     const dy=(this.y+this.h/2)-(target.y+target.h/2);
     if(Math.abs(dx)<rangeX && Math.abs(dy)<rangeY){
-        let dmg=0,vx=0,vy=0;
-        const k=1+target.damage*0.03;
-        switch(this.attackType){
-            case "weak": dmg=8; vx=(dx>0?-4:4)*k; vy=-3; break;
-            case "forward": dmg=12; vx=(dx>0?-6:6)*k; vy=-4; break;
-            case "air": dmg=10; vx=(dx>0?-5:5)*k; vy=-5; break;
-            case "down": dmg=14; vx=0; vy=6; break;
-        }
-        target.damage+=dmg;
-        target.vx=vx; target.vy=vy;
-        target.hitFlash=6; target.hitBounce=2;
-
-        // 空中コンボ対応
-        if(!target.onGround() && this.state==="attack"){ target.vy-=2; }
-
-        // パーティクル生成
-        for(let i=0;i<8;i++){
-            particles.push({
-                x: target.x+target.w/2,
-                y: target.y+target.h/2,
-                vx:(Math.random()-0.5)*4,
-                vy:(Math.random()-0.5)*4,
-                life:12
-            });
-        }
+      let dmg=0,vx=0,vy=0;
+      const k=1+target.damage*0.05;
+      switch(this.attackType){
+        case "weak": dmg=8; vx=(dx>0?-5:5)*k; vy=-3*k; break;
+        case "forward": dmg=12; vx=(dx>0?-8:8)*k; vy=-4*k; break;
+        case "air": dmg=10; vx=(dx>0?-6:6)*k; vy=-6*k; break;
+        case "down": dmg=14; vx=0; vy=8*k; break;
+      }
+      target.damage+=dmg; target.vx=vx; target.vy=vy; target.hitFlash=6; target.hitBounce=2;
+      if(!target.onGround() && this.state==="attack"){ target.vy-=2; }
     }
   }
-
   draw(){
-    if(this.respawnTimer>0){
-        ctx.globalAlpha=0.5+0.05*(10-this.respawnTimer); this.respawnTimer--;
-    } else ctx.globalAlpha=1;
+    if(this.respawnTimer>0){ ctx.globalAlpha=0.5+0.05*(10-this.respawnTimer); this.respawnTimer--; } 
+    else ctx.globalAlpha=1;
 
-    if(this.hitFlash>0){ ctx.fillStyle="orange"; this.hitFlash--; this.y-=this.hitBounce; }
+    if(this.hitFlash>0){ ctx.fillStyle="orange"; this.hitFlash--; this.y-=this.hitBounce; } 
     else ctx.fillStyle=this.state==="attack"?"red":this.color;
 
     // 胴体
     ctx.fillRect(this.x,this.y,this.w,this.h);
     // 頭
     ctx.fillRect(this.x+8,this.y-20,this.w-16,20);
-    // 手足
-    ctx.fillRect(this.x-8,this.y+8,8,this.h-16);
-    ctx.fillRect(this.x+this.w,this.y+8,8,this.h-16);
-    ctx.fillRect(this.x+8,this.y+this.h,12,16);
-    ctx.fillRect(this.x+this.w-20,this.y+this.h,12,16);
 
-    // ラベル
-    ctx.fillStyle="white"; ctx.font="14px sans-serif";
-    ctx.fillText(this.isCPU?"CPU":"P",this.x,this.y-25);
-
-    ctx.globalAlpha=1;
-
-    // パーティクル描画
-    particles.forEach((p,i)=>{
-        ctx.fillStyle="yellow";
-        ctx.fillRect(p.x,p.y,4,4);
-        p.x+=p.vx; p.y+=p.vy; p.life--;
-        if(p.life<=0) particles.splice(i,1);
-    });
-  }
-
-  respawn(){
-    this.x=this.spawnX; this.y=this.spawnY; this.vx=0; this.vy=0;
-    this.damage=0; this.jumpCount=0; this.state="idle"; this.respawnTimer=10;
-    if(this.isCPU) score.player++;
-    else score.cpu++;
-  }
-
-  onGround(){ return platforms.some(p=>this.y+this.h===p.y); }
-}
-
-// --- CPU ---
-class CPU extends Player{
-  constructor(x,y,color){ super(x,y,color,true); this.aiTimer=0; }
-  update(player){
-    this.aiTimer--;
-    if(this.aiTimer<=0){
-      this.aiTimer=25+Math.random()*35;
-      const dx=player.x-this.x; const dy=player.y-this.y;
-      if(Math.abs(dx)>50) this.vx=dx>0?2:-2; else this.vx=0;
-      if(dy<-20 && this.jumpCount<2 && Math.random()<0.6){ this.vy=-10; this.jumpCount++; }
-      if(this.state==="idle"){
-        if(Math.abs(dx)<40 && Math.abs(dy)<50){ this.state="attack"; this.attackType=Math.random()<0.4?"weak":"air"; this.attackTimer=this.attackType==="weak"?14:16; }
-        else if(Math.abs(dx)<120 && Math.random()<0.35){ this.state="attack"; this.attackType="forward"; this.attackTimer=24; }
-        else if(Math.abs(dx)<60 && dy>20 && Math.random()<0.3){ this.state="attack"; this.attackType="down"; this.attackTimer=18; }
+    // 手足初期位置
+    let lH=this.x-8,lHY=this.y+8, rH=this.x+this.w, rHY=this.y+8;
+    let lF=this.x+8,lFY=this.y+this.h, rF=this.x+this.w-20,rFY=this.y+this.h;
+    if(this.state==="attack"){
+      switch(this.attackType){
+        case "weak": rH+=6; break;
+        case "forward": rH+=12; lF+=4; break;
+        case "air": lFY-=6; rFY-=6; break;
+        case "down": lHY+=8; rHY+=8; break;
       }
     }
-    super.update(player);
+    ctx.fillRect(lH,lHY,8,this.h-16);
+    ctx.fillRect(rH,rHY,8,this.h-16);
+    ctx.fillRect(lF,lFY,12,16);
+    ctx.fillRect(rF,rFY,12,16);
+
+    ctx.fillStyle="white"; ctx.font="14px sans-serif";
+    ctx.fillText(this.isCPU?"CPU":"P",this.x,this.y-25);
+    ctx.globalAlpha=1;
   }
 }
 
-// --- インスタンス ---
-const player=new Player(60,220,"blue");
-const cpu=new CPU(380,220,"green");
-
-// --- UI ---
-const stick=document.getElementById("stick");
-const jump=document.getElementById("jump");
-const attackA=document.getElementById("attackA");
-const attackB=document.getElementById("attackB");
-
-// ボタン配置
-jump.style.width=jump.style.height="100px"; jump.style.bottom="160px"; jump.style.right="40px";
-attackA.style.width=attackA.style.height="90px"; attackA.style.bottom="60px"; attackA.style.right="40px";
-attackB.style.width=attackB.style.height="90px"; attackB.style.bottom="60px"; attackB.style.right="140px";
-
-// スティック操作
-let stickX=0,stickY=0;
-const stickRadius=80;
-const stickCenter={x:100,y:canvas.height-100};
-stick.addEventListener('touchmove',e=>{
-  const t=e.touches[0];
-  let dx=t.clientX-stickCenter.x;
-  let dy=t.clientY-stickCenter.y;
-  const dist=Math.sqrt(dx*dx+dy*dy);
-  if(dist>stickRadius){ dx=dx/dist*stickRadius; dy=dy/dist*stickRadius; }
-  stickX=(dx/stickRadius)*1.2;
-});
-stick.addEventListener('touchend',e=>{ stickX=0; stickY=0; });
-
-// ジャンプボタン
-jump.addEventListener('touchstart',e=>{ if(player.jumpCount<2){ player.vy=-10; player.jumpCount++; } });
-
-// 攻撃ボタン
-attackA.addEventListener('touchstart',e=>{ if(player.state==="idle"){ player.state="attack"; player.attackType="weak"; player.attackTimer=14; } });
-attackB.addEventListener('touchstart',e=>{ if(player.state==="idle"){ player.state="attack"; player.attackType="forward"; player.attackTimer=24; } });
-
-// --- 描画 ---
-function drawPlatforms(){ ctx.fillStyle="#555"; platforms.forEach(p=>ctx.fillRect(p.x,p.y,p.w,p.h)); }
-function drawScore(){ ctx.fillStyle="black"; ctx.font="20px sans-serif"; ctx.fillText(`P: ${score.player}`,20,30); ctx.fillText(`CPU: ${score.cpu}`,380,30); }
-
-// --- ラウンド判定 ---
-function checkRound(){
-  if(roundOver) return;
-  if(score.player>=3 || score.cpu>=3){
-      roundOver=true;
-      winner = score.player>=3 ? "P" : "CPU";
-      setTimeout(()=>{ 
-          roundOver=false; score.player=0; score.cpu=0; 
-          player.respawn(); cpu.respawn(); 
-      }, 3000);
-  }
-}
-
-// --- メインループ ---
-function loop(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    drawPlatforms();
-    player.vx=stickX*4;
-    player.update(cpu);
-    cpu.update(player);
-    player.draw();
-    cpu.draw();
-    drawScore();
-    checkRound();
-
-    if(roundOver){
-        ctx.fillStyle="gold"; ctx.font="40px sans-serif";
-        ctx.fillText(`${winner} WIN!`, canvas.width/2-70, canvas.height/2);
-        if(winner==="P") player.hitFlash=10;
-        else cpu.hitFlash=10;
+class CPU extends Player{
+  constructor(x,y,color){ super(x,y,color,true); this.aiTimer=0; }
+  updateCPU(player){
+    this.aiTimer--;
+    if(this.aiTimer<=0){
+      this.aiTimer = 20 + Math.random()*30;
+      const dx=player.x-this.x;
+      const dy=player.y-this.y;
+      this.vx=dx>0?2:-2;
+      if(dy<-20 && this.jumpCount<2 && Math.random()<0.6){ this.vy=-10; this.jumpCount++; }
+      if(Math.abs(dx)<50 && Math.abs(dy)<50){ this.state="attack"; this.attackType=Math.random()<0.5?"weak":"air"; this.attackTimer=this.attackType==="weak"?14:16; }
+      else if(Math.abs(dx)<120 && Math.random()<0.3){ this.state="attack"; this.attackType="forward"; this.attackTimer=24; }
+      else if(Math.abs(dx)<60 && dy>20 && Math.random()<0.2){ this.state="attack"; this.attackType="down"; this.attackTimer=18; }
     }
-
-    requestAnimationFrame(loop);
+    // 重力
+    if(!this.onGround()) this.vy+=0.5; else { this.vy=0; this.jumpCount=0; this.y=canvas.height-40-this.h; }
+    this.x+=this.vx; this.y+=this.vy;
+    if(this.attackTimer>0) this.attackTimer--;
+    if(this.attackTimer===0 && this.state==="attack") this.state="idle";
+    // 場外判定
+    if(this.y>canvas.height+50 || this.x<-50 || this.x>canvas.width+50 || this.y<-50){ this.respawn(); }
+  }
 }
-loop();
 
+let player=new Player(100,300,"blue");
+let cpu=new CPU(500,300,"green");
+let particles=[];
+
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  player.attackHit(cpu);
+  cpu.attackHit(player);
+
+  player.update(cpu);
+  cpu.update(player);
+
+  player.draw();
+  cpu.draw();
+
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+
+// 操作ボタン
+document.getElementById("jump").addEventListener("mousedown",()=>{ 
+  if(player.jumpCount<2){ player.vy=-10; player.jumpCount++; } 
+});
+document.getElementById("attackA").addEventListener("mousedown",()=>{
+  player.state="attack"; player.attackType=player.onGround()?"weak":"air"; player.attackTimer=14;
+});
+document.getElementById("attackB").addEventListener("mousedown",()=>{
+  player.state="attack"; player.attackType=player.onGround()?"forward":"air"; player.attackTimer=24;
+});
+
+// 左右移動は簡易スティック
+document.getElementById("stick").addEventListener("mousemove",(e)=>{
+  const rect=e.target.getBoundingClientRect();
+  const cx=rect.left+rect.width/2, cy=rect.top+rect.height/2;
+  const dx=e.clientX-cx, dy=e.clientY-cy;
+  keys.left=dx<-10; keys.right=dx>10;
+});
+document.getElementById("stick").addEventListener("mouseleave",()=>{ keys.left=false; keys.right=false; });
 </script>
 </body>
 </html>
